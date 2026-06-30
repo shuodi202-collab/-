@@ -1,0 +1,897 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LAN Chat</title>
+<style>
+/* === Reset & Base === */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f0f2f5; --surface: #fff; --text: #1a1a2e; --text2: #666;
+  --primary: #4f46e5; --primary-hover: #4338ca; --msg-self: #dcf8c6;
+  --msg-other: #fff; --border: #e0e0e0; --success: #22c55e;
+  --warning: #eab308; --error: #ef4444; --shadow: 0 1px 3px rgba(0,0,0,.1);
+  --radius: 8px; --radius-sm: 4px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1a1a2e; --surface: #16213e; --text: #e0e0e0; --text2: #999;
+    --primary: #6366f1; --primary-hover: #818cf8; --msg-self: #1e3a5f;
+    --msg-other: #2a2a4a; --border: #333; --shadow: 0 1px 3px rgba(0,0,0,.3);
+  }
+}
+html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); font-size: 14px; }
+
+/* === Layout === */
+#app { display: flex; flex-direction: column; height: 100vh; max-width: 900px; margin: 0 auto; }
+
+header {
+  display: flex; align-items: center; gap: 12px; padding: 10px 16px;
+  background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+header h1 { font-size: 16px; font-weight: 600; flex: 1; }
+header .peer-count { font-size: 12px; color: var(--text2); }
+
+/* === Connection Panel (collapsible footer) === */
+#connection-panel {
+  background: var(--surface); border-top: 1px solid var(--border);
+  flex-shrink: 0; max-height: 50vh; overflow-y: auto;
+}
+#connection-panel .panel-header {
+  display: flex; align-items: center; gap: 8px; padding: 8px 16px;
+  cursor: pointer; user-select: none; font-size: 13px; color: var(--text2);
+}
+#connection-panel .panel-header:hover { background: rgba(128,128,128,.05); }
+#connection-panel .panel-header .arrow { transition: transform .2s; }
+#connection-panel .panel-header .arrow.open { transform: rotate(90deg); }
+#connection-panel .panel-body { padding: 8px 16px 16px; }
+
+.row { display: flex; gap: 16px; flex-wrap: wrap; }
+.col { flex: 1; min-width: 240px; }
+.form-group { margin-bottom: 8px; }
+.form-group label { display: block; font-size: 12px; color: var(--text2); margin-bottom: 4px; }
+input, textarea, button { font-family: inherit; font-size: 13px; }
+input[type="text"], input[type="url"], textarea {
+  width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg); color: var(--text); outline: none;
+}
+input:focus, textarea:focus { border-color: var(--primary); }
+textarea { resize: vertical; min-height: 50px; font-family: 'SFMono-Regular', Consolas, monospace; font-size: 11px; }
+.btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 8px 16px; border: none; border-radius: var(--radius-sm); cursor: pointer;
+  font-weight: 500; transition: background .15s; white-space: nowrap;
+}
+.btn-primary { background: var(--primary); color: #fff; }
+.btn-primary:hover { background: var(--primary-hover); }
+.btn-secondary { background: var(--border); color: var(--text); }
+.btn-secondary:hover { background: #ccc; }
+.btn-sm { padding: 4px 10px; font-size: 12px; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.invite-code-box { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px; word-break: break-all; font-family: monospace; font-size: 11px; max-height: 80px; overflow-y: auto; margin: 4px 0; }
+.inline-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.status-badge { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
+.status-badge.connected { background: var(--success); }
+.status-badge.connecting { background: var(--warning); }
+.status-badge.disconnected, .status-badge.failed { background: var(--error); }
+.error-msg { color: var(--error); font-size: 12px; margin-top: 4px; }
+
+/* === Main Content (Chat + Sidebar) === */
+main { flex: 1; display: flex; overflow: hidden; }
+
+/* Sidebar */
+#sidebar {
+  width: 160px; flex-shrink: 0; background: var(--surface);
+  border-right: 1px solid var(--border); padding: 8px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 2px;
+}
+#sidebar .section-title { font-size: 11px; color: var(--text2); text-transform: uppercase; letter-spacing: .5px; padding: 4px 8px; }
+.peer-item {
+  display: flex; align-items: center; gap: 6px; padding: 6px 8px;
+  border-radius: var(--radius-sm); font-size: 13px;
+}
+.peer-item .avatar {
+  width: 24px; height: 24px; border-radius: 50%; background: var(--primary);
+  color: #fff; display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 600; flex-shrink: 0;
+}
+.peer-item .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.peer-item .name.me { font-weight: 600; }
+.peer-item .state { font-size: 11px; color: var(--text2); }
+#no-rtc { display: none; text-align: center; padding: 40px 20px; color: var(--error); }
+
+/* === Chat Area === */
+#chat-area { flex: 1; display: flex; flex-direction: column; background: var(--bg); }
+
+/* Messages */
+#messages {
+  flex: 1; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 6px;
+}
+.msg {
+  max-width: 75%; padding: 8px 12px; border-radius: 12px;
+  line-height: 1.45; position: relative; word-wrap: break-word;
+}
+.msg.self { align-self: flex-end; background: var(--msg-self); border-bottom-right-radius: 4px; }
+.msg.other { align-self: flex-start; background: var(--msg-other); border-bottom-left-radius: 4px; }
+.msg.system { align-self: center; background: transparent; color: var(--text2); font-size: 12px; max-width: 100%; font-style: italic; }
+.msg .sender { font-size: 11px; font-weight: 600; color: var(--primary); margin-bottom: 2px; }
+.msg .time { font-size: 10px; color: var(--text2); margin-top: 4px; text-align: right; }
+.msg .time .full-time { display: none; }
+.msg:hover .time .full-time { display: inline; }
+.msg:hover .time .short-time { display: none; }
+.new-msg-indicator {
+  display: none; align-self: center; padding: 4px 12px; background: var(--primary);
+  color: #fff; border-radius: 12px; font-size: 11px; cursor: pointer; position: sticky; bottom: 0;
+}
+
+/* Input Area */
+#input-area {
+  display: flex; gap: 8px; padding: 10px 16px; background: var(--surface);
+  border-top: 1px solid var(--border); align-items: flex-end;
+}
+#input-area textarea {
+  flex: 1; resize: none; min-height: 36px; max-height: 120px; padding: 8px 12px;
+  border-radius: 18px; background: var(--bg);
+}
+#input-area .btn { border-radius: 50%; width: 36px; height: 36px; padding: 0; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+
+/* === Transition States === */
+#chat-view { display: none; flex-direction: column; flex: 1; }
+#connect-view { display: flex; flex-direction: column; flex: 1; align-items: center; justify-content: center; padding: 40px 20px; }
+#connect-view .connect-card {
+  background: var(--surface); border-radius: var(--radius); padding: 32px;
+  box-shadow: var(--shadow); max-width: 420px; width: 100%;
+}
+#connect-view h2 { font-size: 18px; margin-bottom: 8px; }
+#connect-view p { color: var(--text2); font-size: 13px; margin-bottom: 20px; }
+
+/* Responsive */
+@media (max-width: 600px) {
+  #sidebar { width: 120px; }
+  .row { flex-direction: column; }
+  .col { min-width: 0; }
+  .msg { max-width: 85%; }
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>💬 LAN Chat</h1>
+    <span class="peer-count" id="peerCount"></span>
+  </header>
+
+  <!-- Compatibility Check -->
+  <div id="no-rtc">
+    <strong>您的浏览器不支持 WebRTC</strong><br>
+    请使用最新版 Chrome、Firefox、Safari 或 Edge。
+  </div>
+
+  <!-- Connect View -->
+  <div id="connect-view">
+    <div class="connect-card">
+      <h2>局域网聊天室</h2>
+      <p>P2P 直连，所有数据不经服务器中转。</p>
+      <div class="form-group">
+        <label for="nickname-input">昵称</label>
+        <input type="text" id="nickname-input" placeholder="输入你的昵称..." maxlength="20">
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:16px;">
+        <button class="btn btn-primary" id="btn-create-room">🚀 创建房间</button>
+        <span style="display:flex;align-items:center;color:var(--text2);font-size:12px;">或</span>
+        <button class="btn btn-secondary" id="btn-show-join">🔗 加入房间</button>
+      </div>
+      <div id="join-area" style="display:none;">
+        <div class="form-group">
+          <label for="invite-input">粘贴邀请码</label>
+          <textarea id="invite-input" placeholder="粘贴对方给你的邀请码..."></textarea>
+        </div>
+        <button class="btn btn-primary" id="btn-join-room">加入</button>
+        <div id="join-error" class="error-msg" style="display:none;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chat View -->
+  <div id="chat-view">
+    <main>
+      <aside id="sidebar">
+        <div class="section-title">在线成员</div>
+        <div id="member-list"></div>
+      </aside>
+      <div id="chat-area">
+        <div id="messages"></div>
+        <div id="input-area">
+          <textarea id="msg-input" placeholder="输入消息..." rows="1"></textarea>
+          <button class="btn btn-primary" id="btn-send">➤</button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Connection Panel -->
+  <div id="connection-panel">
+    <div class="panel-header" id="panel-toggle">
+      <span class="arrow" id="panel-arrow">▶</span>
+      📡 连接面板
+      <span id="panel-status" style="margin-left:auto;font-size:12px;"></span>
+    </div>
+    <div class="panel-body" id="panel-body" style="display:none;">
+      <div class="row">
+        <div class="col">
+          <div class="form-group">
+            <label>📤 邀请码（发给对方）</label>
+            <div class="invite-code-box" id="invite-code-display">—</div>
+            <div class="inline-actions">
+              <button class="btn btn-sm btn-secondary" id="btn-copy-invite">📋 复制</button>
+              <button class="btn btn-sm btn-secondary" id="btn-qr">📱 二维码</button>
+            </div>
+            <div id="qr-container" style="display:none;margin-top:8px;text-align:center;"></div>
+          </div>
+        </div>
+        <div class="col">
+          <div class="form-group">
+            <label>📥 应答码（粘贴对方返回的应答）</label>
+            <textarea id="reply-input" placeholder="粘贴对方返回的应答码..."></textarea>
+            <div class="inline-actions">
+              <button class="btn btn-sm btn-primary" id="btn-submit-reply">确认应答</button>
+            </div>
+            <div id="reply-error" class="error-msg" style="display:none;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+/* === WebRTC Compatibility Check === */
+if (!window.RTCPeerConnection) {
+  document.getElementById('no-rtc').style.display = 'block';
+  document.getElementById('connect-view').style.display = 'none';
+  document.getElementById('chat-view').style.display = 'none';
+}
+
+/* === Config === */
+const STUN_SERVERS = [
+  'stun:stun.l.google.com:19302',
+  'stun:stun1.l.google.com:19302',
+];
+const MSG_STORE_KEY = 'lanchat_messages';
+const MAX_MSG_LENGTH = 5000; // max chars per message
+function genId() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) { try { return crypto.randomUUID(); } catch(_) {} }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0;
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+  });
+}
+const peerId = genId();
+let myNickname = '';
+let servingOffer = null;    // { pc, fakePeerId } for creator awaiting answer
+const peers = new Map();    // peerId -> { nickname, pc, channel, state }
+const messages = [];
+const connectedPeers = new Map(); // peerId -> { nickname }
+
+let msgInput, messagesEl, memberListEl, peerCountEl, inviteCodeDisplay;
+let panelBodyEl, panelArrowEl, panelStatusEl;
+let connectView, chatView;
+
+function $(id) { return document.getElementById(id); }
+function uuid() { return crypto.randomUUID(); }
+function now() { return Date.now(); }
+
+function base64Encode(obj) {
+  try {
+    const json = JSON.stringify(obj);
+    // Use UTF-8 safe encoding for non-ASCII characters
+    return btoa(unescape(encodeURIComponent(json)));
+  } catch (e) { return ''; }
+}
+function base64Decode(s) {
+  try {
+    const json = decodeURIComponent(escape(atob(s)));
+    return JSON.parse(json);
+  } catch (e) { return null; }
+}
+
+function formatTime(ts) {
+  return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+/* ─── PeerConnection Management ─────────────────────────── */
+
+function createPC(targetId, isInitiator) {
+  cleanupPeer(targetId);
+  const pc = new RTCPeerConnection({ iceServers: [{ urls: STUN_SERVERS }] });
+  const ps = { id: targetId, nickname: targetId, pc, channel: null, state: 'connecting' };
+  peers.set(targetId, ps);
+
+  pc.oniceconnectionstatechange = () => {
+    ps.state = pc.iceConnectionState;
+    if (ps.state === 'connected') {
+      addSystemMessage(`${ps.nickname || targetId} 已连接`);
+    } else if (ps.state === 'failed' || ps.state === 'disconnected') {
+      addSystemMessage(`${ps.nickname || targetId} ${ps.state === 'failed' ? '连接失败' : '已断开'}`);
+    }
+    updateMemberList();
+    updatePanelStatus();
+  };
+
+  if (isInitiator) {
+    const ch = pc.createDataChannel('chat', { ordered: true });
+    setupChannel(ch, targetId);
+    ps.channel = ch;
+  }
+  pc.ondatachannel = (e) => {
+    setupChannel(e.channel, targetId);
+    ps.channel = e.channel;
+  };
+  return pc;
+}
+
+function setupChannel(ch, id) {
+  ch.onopen = () => {
+    const ps = peers.get(id);
+    if (ps) {
+      ps.state = 'connected';
+      updateMemberList();
+      updatePanelStatus();
+    }
+    // Send HELLO on first open
+    sendJson(ch, { type: 'hello', from: peerId, nickname: myNickname });
+  };
+  ch.onclose = () => {
+    const ps = peers.get(id);
+    if (ps) { ps.state = 'disconnected'; updateMemberList(); updatePanelStatus(); }
+  };
+  ch.onmessage = (e) => {
+    try { handleMessage(JSON.parse(e.data), id); }
+    catch (_) { /* ignore malformed */ }
+  };
+}
+
+function cleanupPeer(id) {
+  const ps = peers.get(id);
+  if (ps) {
+    try { ps.channel?.close(); } catch (_) {}
+    try { ps.pc.close(); } catch (_) {}
+    peers.delete(id);
+  }
+}
+
+function sendJson(ch, data) {
+  try { if (ch.readyState === 'open') ch.send(JSON.stringify(data)); }
+  catch (_) {}
+}
+
+/* ─── Protocol Message Handler ──────────────────────────── */
+
+function handleMessage(data, fromId) {
+  switch (data.type) {
+    case 'hello':
+      const ps = peers.get(fromId);
+      if (ps) ps.nickname = data.nickname || fromId;
+      connectedPeers.set(fromId, { nickname: ps?.nickname || data.nickname || fromId });
+      // reply hello
+      const ch = peers.get(fromId)?.channel;
+      if (ch?.readyState === 'open') {
+        sendJson(ch, { type: 'hello-ack', from: peerId, nickname: myNickname });
+        // share peer list for multi-peer
+        const others = getOnlinePeers().filter(p => p.id !== fromId);
+        if (others.length > 0) sendJson(ch, { type: 'peer-list', peers: others });
+      }
+      updateMemberList();
+      break;
+
+    case 'hello-ack':
+      const p2 = peers.get(fromId);
+      if (p2) p2.nickname = data.nickname || fromId;
+      connectedPeers.set(fromId, { nickname: p2?.nickname || data.nickname || fromId });
+      updateMemberList();
+      break;
+
+    case 'peer-list':
+      if (Array.isArray(data.peers)) {
+        for (const p of data.peers) {
+          if (p.id === peerId) continue;
+          if (peers.has(p.id) && peers.get(p.id).state === 'connected') continue;
+          relayConnect(p.id, fromId);
+        }
+      }
+      break;
+
+    case 'text':
+      addMessage({
+        type: 'text', from: data.from, nickname: data.nickname || data.from,
+        text: data.text, id: data.id || uuid(), timestamp: data.timestamp || now(),
+      });
+      break;
+
+    case 'relay':
+      relayReceive(data, fromId);
+      break;
+  }
+}
+
+function getOnlinePeers() {
+  const arr = [];
+  for (const [id, ps] of peers) {
+    if (ps.state === 'connected' && ps.channel?.readyState === 'open') {
+      arr.push({ id, nickname: ps.nickname || id });
+    }
+  }
+  return arr;
+}
+
+/* ─── Relay for multi-peer mesh ─────────────────────────── */
+
+function relayConnect(targetId, relayFromId) {
+  createPC(targetId, true);
+  const ps = peers.get(targetId);
+  ps.pc.createOffer()
+    .then(o => ps.pc.setLocalDescription(o))
+    .then(() => waitGather(ps.pc))
+    .then(() => {
+      const relayPs = peers.get(relayFromId);
+      if (relayPs?.channel?.readyState === 'open') {
+        sendJson(relayPs.channel, {
+          type: 'relay', action: 'offer', targetId,
+          sdp: ps.pc.localDescription,
+          from: peerId,
+        });
+      }
+    })
+    .catch(e => console.error('relayConnect offer err', e));
+}
+
+function relayReceive(data, relayFromId) {
+  const targetDataId = data.from || relayFromId;
+  const actualSrc = data.from || relayFromId;
+
+  if (data.action === 'offer') {
+    if (data.targetId === peerId) {
+      // This offer is for us
+      createPC(actualSrc, false);
+      const ps = peers.get(actualSrc);
+      ps.nickname = data.nickname || actualSrc;
+      ps.pc.setRemoteDescription(new RTCSessionDescription(data.sdp))
+        .then(() => ps.pc.createAnswer())
+        .then(a => ps.pc.setLocalDescription(a))
+        .then(() => waitGather(ps.pc))
+        .then(() => {
+          const rps = peers.get(relayFromId);
+          if (rps?.channel?.readyState === 'open') {
+            sendJson(rps.channel, {
+              type: 'relay', action: 'answer', targetId: actualSrc,
+              sdp: ps.pc.localDescription, from: peerId,
+            });
+          }
+        })
+        .catch(e => console.error('relay answer err', e));
+    } else {
+      // Forward to the intended recipient
+      forwardRelay(data, relayFromId);
+    }
+  } else if (data.action === 'answer') {
+    if (data.targetId === peerId) {
+      // Find the PC that's waiting for this answer
+      for (const [id, ps] of peers) {
+        if (ps.state === 'connecting' && ps.pc && id !== relayFromId && id !== actualSrc) {
+          // Try to match
+        }
+      }
+      const ps = peers.get(actualSrc) || findConnectingPC(actualSrc);
+      if (ps?.pc) {
+        ps.pc.setRemoteDescription(new RTCSessionDescription(data.sdp))
+          .then(() => {
+            ps.nickname = data.nickname || actualSrc;
+            updateMemberList();
+          })
+          .catch(e => console.error('relay set answer err', e));
+      }
+    } else {
+      forwardRelay(data, relayFromId);
+    }
+  } else if (data.action === 'ice') {
+    forwardRelay(data, relayFromId);
+  }
+}
+
+function findConnectingPC(targetId) {
+  for (const [id, ps] of peers) {
+    if (ps.state === 'connecting' && ps.pc && id !== targetId) {
+      // re-key
+      peers.set(targetId, ps);
+      ps.id = targetId;
+      peers.delete(id);
+      return ps;
+    }
+  }
+  return null;
+}
+
+function forwardRelay(data, relayFromId) {
+  const targetPs = peers.get(data.targetId);
+  if (targetPs?.channel?.readyState === 'open') {
+    sendJson(targetPs.channel, { ...data, from: relayFromId });
+  }
+}
+
+function waitGather(pc) {
+  return Promise.race([
+    new Promise(resolve => {
+      if (pc.iceGatheringState === 'complete') resolve();
+      else pc.addEventListener('icegatheringstatechange', () => {
+        if (pc.iceGatheringState === 'complete') resolve();
+      });
+    }),
+    new Promise(resolve => setTimeout(resolve, 2000)), // timeout: don't block on slow ICE
+  ]);
+}
+
+/* ─── Room Creation ─────────────────────────────────────── */
+
+function createRoom() {
+  const nickname = $('nickname-input').value.trim();
+  if (!nickname) { $('nickname-input').focus(); return; }
+  myNickname = nickname;
+
+  const fakeId = 'wait-' + peerId.slice(0, 8);
+  const pc = createPC(fakeId, true);
+  peers.get(fakeId).nickname = '(等待对方...)';
+
+  pc.createOffer()
+    .then(o => pc.setLocalDescription(o))
+    .then(() => waitGather(pc))
+    .then(() => {
+      if (!pc.localDescription) return;
+      const code = base64Encode({
+        version: 1, type: 'offer', roomName: `${myNickname} 的房间`,
+        sdp: { type: pc.localDescription.type, sdp: pc.localDescription.sdp },
+        creatorId: peerId, creatorNick: myNickname,
+      });
+      if (!code) return;
+      servingOffer = { pc, fakeId };
+      showInviteCode(code);
+      switchToChat();
+      updatePanelStatus('等待对方应答...');
+    })
+    .catch(e => console.error('createRoom', e));
+}
+
+/* ─── Join Room ─────────────────────────────────────────── */
+
+function joinRoom() {
+  const nickname = $('nickname-input').value.trim();
+  const raw = $('invite-input').value.trim();
+  if (!nickname) { $('nickname-input').focus(); return; }
+  if (!raw) { $('invite-input').focus(); return; }
+  myNickname = nickname;
+
+  const data = base64Decode(raw);
+  if (!data?.sdp) { showJoinError('无效的邀请码'); return; }
+
+  const creatorId = data.creatorId;
+
+  const pc = createPC(creatorId, false);
+  peers.get(creatorId).nickname = data.creatorNick || creatorId;
+
+  pc.setRemoteDescription(new RTCSessionDescription(data.sdp))
+    .then(() => pc.createAnswer())
+    .then(a => pc.setLocalDescription(a))
+    .then(() => waitGather(pc))
+    .then(() => {
+      if (!pc.localDescription) return;
+      const reply = base64Encode({
+        version: 1, type: 'answer',
+        sdp: { type: pc.localDescription.type, sdp: pc.localDescription.sdp },
+        joinerId: peerId, joinerNick: myNickname,
+      });
+      if (!reply) return;
+      showReplyCode(reply);
+      switchToChat();
+      updatePanelStatus('请将应答码发给创建者');
+    })
+    .catch(e => {
+      console.error('joinRoom', e);
+      showJoinError('连接失败，请检查邀请码是否正确');
+    });
+}
+
+/* ─── Accept Answer ─────────────────────────────────────── */
+
+function acceptAnswer() {
+  const raw = $('reply-input').value.trim();
+  if (!raw) { showReplyError('请粘贴应答码'); return; }
+
+  const data = base64Decode(raw);
+  if (!data?.sdp) { showReplyError('无效的应答码'); return; }
+  if (!servingOffer?.pc) { showReplyError('没有等待中的连接，请重新创建房间'); return; }
+
+  const pc = servingOffer.pc;
+  const fakeId = servingOffer.fakeId;
+
+  pc.setRemoteDescription(new RTCSessionDescription(data.sdp))
+    .then(() => {
+      const ps = peers.get(fakeId);
+      const realId = data.joinerId || fakeId;
+      if (ps) {
+        ps.nickname = data.joinerNick || realId;
+        peers.delete(fakeId);
+        peers.set(realId, ps);
+        ps.id = realId;
+        connectedPeers.set(realId, { nickname: ps.nickname });
+        addSystemMessage(`${ps.nickname} 已连接`);
+        updateMemberList();
+        updatePanelStatus('已连接');
+        // handshake
+        if (ps.channel?.readyState === 'open') {
+          sendJson(ps.channel, { type: 'hello', from: peerId, nickname: myNickname });
+        }
+      }
+      servingOffer = null;
+      $('reply-input').value = '';
+      $('reply-error').style.display = 'none';
+    })
+    .catch(e => {
+      console.error('acceptAnswer', e);
+      showReplyError('应答失败（SDP 不匹配）。请重新生成邀请码。');
+    });
+}
+
+/* ─── Messaging ─────────────────────────────────────────── */
+
+function sendMessage(text) {
+  if (!text?.trim()) return;
+  text = text.trim();
+  const msg = {
+    type: 'text', from: peerId, nickname: myNickname,
+    text, id: uuid(), timestamp: now(),
+  };
+  for (const [, ps] of peers) {
+    if (ps.channel?.readyState === 'open') sendJson(ps.channel, msg);
+  }
+  addMessage({ ...msg, _self: true });
+}
+
+function addMessage(msg) {
+  messages.push(msg);
+  saveMessages();
+  renderMessage(msg);
+}
+
+function addSystemMessage(text) {
+  addMessage({ type: 'system', from: '', text, id: uuid(), timestamp: now() });
+}
+
+function renderMessage(msg) {
+  const el = document.createElement('div');
+  el.className = 'msg';
+
+  if (msg.type === 'system') {
+    el.className += ' system';
+    el.textContent = msg.text;
+  } else {
+    const isSelf = msg.from === peerId || msg._self;
+    el.className += isSelf ? ' self' : ' other';
+    let html = '';
+    if (!isSelf) html += `<div class="sender">${escapeHtml(msg.nickname || msg.from)}</div>`;
+    html += `<div>${escapeHtml(msg.text)}</div>`;
+    html += `<div class="time">${formatTime(msg.timestamp)}</div>`;
+    el.innerHTML = html;
+  }
+  messagesEl.appendChild(el);
+  scrollToBottom();
+}
+
+/* ─── Persistence ───────────────────────────────────────── */
+
+function saveMessages() {
+  try {
+    localStorage.setItem(MSG_STORE_KEY, JSON.stringify(messages.slice(-MAX_STORED_MSGS)));
+  } catch (_) {}
+}
+
+function loadMessages() {
+  try {
+    const raw = localStorage.getItem(MSG_STORE_KEY);
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) {
+        messages.push(...arr);
+        messages.forEach(m => renderMessage(m));
+      }
+    }
+  } catch (_) {}
+}
+
+/* ─── UI ────────────────────────────────────────────────── */
+
+function showInviteCode(code) {
+  inviteCodeDisplay.textContent = code;
+}
+
+function showReplyCode(code) {
+  let box = $('reply-code-display');
+  if (!box) {
+    box = document.createElement('div');
+    box.className = 'invite-code-box';
+    box.id = 'reply-code-display';
+    // Insert before the reply error message
+    const replyError = $('reply-error');
+    replyError.parentNode.insertBefore(box, replyError);
+  }
+  box.textContent = code;
+}
+
+function switchToChat() {
+  connectView.style.display = 'none';
+  chatView.style.display = 'flex';
+  // Add self item
+  const existing = $('self-peer-item');
+  if (!existing) {
+    const d = document.createElement('div');
+    d.className = 'peer-item';
+    d.id = 'self-peer-item';
+    d.innerHTML = `<div class="avatar">${escapeHtml(myNickname[0])}</div><span class="name me">${escapeHtml(myNickname)} (我)</span>`;
+    $('member-list').appendChild(d);
+  }
+  updateMemberList();
+}
+
+function updateMemberList() {
+  const cont = $('member-list');
+  document.querySelectorAll('#member-list .peer-item:not(#self-peer-item)').forEach(e => e.remove());
+  for (const [id, ps] of peers) {
+    if (ps.state === 'disconnected' || ps.state === 'failed') continue;
+    if (id.startsWith('wait-')) continue;
+    const n = ps.nickname || id;
+    const cls = ps.state === 'connected' ? 'connected' : 'connecting';
+    const lbl = ps.state === 'connected' ? '' : ' 连接中...';
+    const d = document.createElement('div');
+    d.className = 'peer-item';
+    d.innerHTML = `<div class="avatar">${escapeHtml(n[0])}</div><span class="name">${escapeHtml(n)}</span><span class="state">${lbl}</span><span class="status-badge ${cls}"></span>`;
+    cont.appendChild(d);
+  }
+  const count = Array.from(peers.values()).filter(p => p.state === 'connected').length;
+  $('peerCount').textContent = `在线: ${count}`;
+}
+
+function updatePanelStatus(msg) {
+  panelStatusEl.textContent = msg || '';
+}
+
+function showJoinError(msg) {
+  $('join-error').textContent = msg;
+  $('join-error').style.display = 'block';
+}
+
+function showReplyError(msg) {
+  $('reply-error').textContent = msg;
+  $('reply-error').style.display = 'block';
+}
+
+function scrollToBottom() {
+  const near = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 80;
+  if (near) messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function togglePanel() {
+  const open = panelBodyEl.style.display !== 'none';
+  panelBodyEl.style.display = open ? 'none' : 'block';
+  panelArrowEl.className = 'arrow' + (open ? '' : ' open');
+}
+
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+}
+
+function copyText(text) {
+  navigator.clipboard.writeText(text).catch(() => {
+    const ta = document.createElement('textarea');
+    ta.value = text; document.body.appendChild(ta);
+    ta.select(); document.execCommand('copy'); ta.remove();
+  });
+}
+
+/* ─── QR Code ───────────────────────────────────────────── */
+
+let qrLoaded = false;
+function loadQRCode() {
+  if (qrLoaded) return;
+  const s = document.createElement('script');
+  s.src = 'https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js';
+  s.onload = () => { qrLoaded = true; renderQR(); };
+  s.onerror = () => { $('qr-container').innerHTML = '<span style="font-size:12px;color:var(--text2);">二维码加载失败</span>'; };
+  document.head.appendChild(s);
+}
+
+function renderQR() {
+  const c = $('qr-container');
+  c.style.display = 'block'; c.innerHTML = '';
+  const code = inviteCodeDisplay.textContent;
+  if (!code || code === '—') return;
+  if (typeof QRCode !== 'undefined') new QRCode(c, { text: code, width: 160, height: 160 });
+  else c.innerHTML = '<span style="font-size:12px;color:var(--text2);">加载中...</span>';
+}
+
+/* ─── Init ──────────────────────────────────────────────── */
+
+function init() {
+  connectView = $('connect-view');
+  chatView = $('chat-view');
+  msgInput = $('msg-input');
+  messagesEl = $('messages');
+  memberListEl = $('member-list');
+  peerCountEl = $('peerCount');
+  inviteCodeDisplay = $('invite-code-display');
+  panelBodyEl = $('panel-body');
+  panelArrowEl = $('panel-arrow');
+  panelStatusEl = $('panel-status');
+
+  // Connection panel toggle
+  $('panel-toggle').addEventListener('click', togglePanel);
+
+  // Create room
+  $('btn-create-room').addEventListener('click', createRoom);
+
+  // Show join form
+  $('btn-show-join').addEventListener('click', () => {
+    const area = $('join-area');
+    area.style.display = area.style.display === 'none' ? 'block' : 'none';
+  });
+
+  // Join room
+  $('btn-join-room').addEventListener('click', joinRoom);
+  $('invite-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); joinRoom(); }
+  });
+
+  // Accept answer
+  $('btn-submit-reply').addEventListener('click', acceptAnswer);
+
+  // Copy invite code
+  $('btn-copy-invite').addEventListener('click', () => copyText(inviteCodeDisplay.textContent));
+
+  // QR Code
+  $('btn-qr').addEventListener('click', loadQRCode);
+
+  // Send
+  $('btn-send').addEventListener('click', () => {
+    sendMessage(msgInput.value);
+    msgInput.value = ''; msgInput.style.height = 'auto';
+  });
+  msgInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('btn-send').click(); }
+  });
+  msgInput.addEventListener('input', () => autoResize(msgInput));
+
+  // Load history
+  loadMessages();
+
+  // Show initial view
+  connectView.style.display = 'flex';
+  chatView.style.display = 'none';
+  $('nickname-input').focus();
+}
+
+// init() called below via deferred pattern
+if (document.readyState !== 'loading') {
+  init();
+} else {
+  document.addEventListener('DOMContentLoaded', init);
+}
+</script>
+</body>
+</html>

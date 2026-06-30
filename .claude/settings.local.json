@@ -1,0 +1,64 @@
+{
+  "env": {
+    "CLAUDE_PLUGIN_ROOT": "D:/new/.claude/ponytail-hooks"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(npm install *)",
+      "Bash(openspec --help)",
+      "Bash(npx openspec *)",
+      "Bash(openspec init *)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Read(//d/D:/**)",
+      "Bash(ls openspec/)",
+      "Bash(openspec new *)",
+      "Bash(openspec status *)",
+      "Bash(openspec instructions *)",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(codegraph --help)",
+      "Bash(node -e ' *)",
+      "Bash(codegraph init *)",
+      "Bash(openspec list *)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/ponytail-activate.js\"; exit 0",
+            "timeout": 5,
+            "statusMessage": "Loading ponytail mode..."
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/ponytail-subagent.js\"; exit 0",
+            "timeout": 5,
+            "statusMessage": "Loading ponytail mode..."
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/ponytail-mode-tracker.js\"; exit 0",
+            "timeout": 5,
+            "statusMessage": "Tracking ponytail mode..."
+          }
+        ]
+      }
+    ]
+  }
+}
